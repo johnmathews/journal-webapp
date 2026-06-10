@@ -66,25 +66,30 @@ vi.mock('@/api/preferences', () => ({
   updatePreferences: vi.fn().mockResolvedValue({ preferences: {} }),
 }))
 
-// Stub chartjs-config so the view doesn't try to read real CSS
-// variables in the happy-dom environment (they're empty strings,
-// which makes adjustColorOpacity throw). The view only uses
-// `getChartColors` for its return shape.
-vi.mock('@/utils/chartjs-config', () => ({
-  getChartColors: () => ({
-    textColor: { light: '#94a3b8', dark: '#64748b' },
-    gridColor: { light: '#e2e8f0', dark: '#334155' },
-    backdropColor: { light: '#fff', dark: '#1e293b' },
-    tooltipTitleColor: { light: '#334155', dark: '#f1f5f9' },
-    tooltipBodyColor: { light: '#64748b', dark: '#94a3b8' },
-    tooltipBgColor: { light: '#fff', dark: '#334155' },
-    tooltipBorderColor: { light: '#e2e8f0', dark: '#475569' },
-  }),
-  getThemedGridColor: () => '#e2e8f0',
-  chartAreaGradient: () => 'transparent',
-  TOOLTIP_HOVER_DELAY_MS: 1000,
-  tooltipHoverDelayPlugin: { id: 'tooltipHoverDelay' },
-}))
+// Stub the color helpers in chartjs-config so the chart components
+// don't try to read real CSS variables in the happy-dom environment
+// (they're empty strings, which makes adjustColorOpacity throw).
+// `buildLineChartOptions` stays real so the line charts construct the
+// canonical options shape from the stubbed colors.
+vi.mock('@/utils/chartjs-config', async () => {
+  const actual = await vi.importActual<typeof import('@/utils/chartjs-config')>(
+    '@/utils/chartjs-config',
+  )
+  return {
+    ...actual,
+    getChartColors: () => ({
+      textColor: { light: '#94a3b8', dark: '#64748b' },
+      gridColor: { light: '#e2e8f0', dark: '#334155' },
+      backdropColor: { light: '#fff', dark: '#1e293b' },
+      tooltipTitleColor: { light: '#334155', dark: '#f1f5f9' },
+      tooltipBodyColor: { light: '#64748b', dark: '#94a3b8' },
+      tooltipBgColor: { light: '#fff', dark: '#334155' },
+      tooltipBorderColor: { light: '#e2e8f0', dark: '#475569' },
+    }),
+    getThemedGridColor: () => '#e2e8f0',
+    chartAreaGradient: () => 'transparent',
+  }
+})
 
 vi.mock('@/utils/mosaic', async () => {
   const actual =
