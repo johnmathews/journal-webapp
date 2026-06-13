@@ -92,6 +92,8 @@ export const useStorylinesStore = defineStore('storylines', () => {
 
   function clearCurrent(): void {
     currentStoryline.value = null
+    currentChapter.value = null
+    chapterLoading.value = false
   }
 
   async function createStoryline(

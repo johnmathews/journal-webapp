@@ -219,6 +219,25 @@ describe('useStorylinesStore', () => {
     expect(store.currentStoryline).toBeNull()
   })
 
+  it('clearCurrent also nulls currentChapter and resets chapterLoading', async () => {
+    mockFetchStoryline.mockResolvedValue({
+      ...mockSummary({ id: 1 }),
+      chapters: [],
+      panels: {},
+    })
+    mockFetchStorylineChapter.mockResolvedValue(
+      mockChapterDetail({ id: 3, storyline_id: 1 }),
+    )
+    const store = useStorylinesStore()
+    await store.loadStoryline(1)
+    await store.loadChapter(1, 3)
+    expect(store.currentChapter).not.toBeNull()
+    store.clearCurrent()
+    expect(store.currentStoryline).toBeNull()
+    expect(store.currentChapter).toBeNull()
+    expect(store.chapterLoading).toBe(false)
+  })
+
   it('createStoryline returns the response and resets the creating flag', async () => {
     mockCreateStoryline.mockResolvedValue({
       id: 10,

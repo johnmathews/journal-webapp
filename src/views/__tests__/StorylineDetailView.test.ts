@@ -767,4 +767,78 @@ describe('StorylineDetailView', () => {
     void wrapper
     await router.push('/storylines/3')
   })
+
+  it('restarts citation numbering per chapter (each chapter numbers from [1])', async () => {
+    // Two chapters with DIFFERENT citation panels: chapter 1 cites entry
+    // 7, chapter 2 cites entry 42. The registry is built per-chapter from
+    // currentChapter.panels, so each chapter's first citation must be [1]
+    // — numbering does NOT continue from the previous chapter.
+    const detail = mockDetailTwoChapters()
+    mockFetchStoryline.mockResolvedValue(detail)
+    // Distinct panels per chapter so a leaked/shared registry would show.
+    function panelsFor(entryId: number, quote: string) {
+      return {
+        curation: {
+          panel_kind: 'curation' as const,
+          segments: [
+            { kind: 'text' as const, text: 'On a day' },
+            { kind: 'citation' as const, entry_id: entryId, quote },
+          ],
+          source_entry_ids: [entryId],
+          citation_count: 1,
+          model_used: 'haiku-4-5',
+          generated_at: '2026-05-12T10:00:00Z',
+        },
+        narrative: {
+          panel_kind: 'narrative' as const,
+          segments: [
+            { kind: 'text' as const, text: 'A chapter. ' },
+            { kind: 'citation' as const, entry_id: entryId, quote },
+          ],
+          source_entry_ids: [entryId],
+          citation_count: 1,
+          model_used: 'opus-4-7',
+          generated_at: '2026-05-12T10:00:00Z',
+        },
+      }
+    }
+    const chapterPanels: Record<number, ReturnType<typeof panelsFor>> = {
+      1: panelsFor(7, 'chapter one quote'),
+      2: panelsFor(42, 'chapter two quote'),
+    }
+    mockFetchChapter.mockImplementation(async (_sid, cid) => {
+      const summary = detail.chapters.find((c) => c.id === cid)!
+      return { ...summary, panels: chapterPanels[cid] } as never
+    })
+
+    const wrapper = mountComponent()
+    await flushPromises()
+    // Default-selects the latest chapter (id 2 → entry 42). Its first
+    // citation numbers from [1].
+    expect(wrapper.find('[data-testid="narrative-footnote-1"]').exists()).toBe(
+      true,
+    )
+    expect(wrapper.find('[data-testid="narrative-footnote-2"]').exists()).toBe(
+      false,
+    )
+    expect(
+      wrapper.find('[data-testid="curation-row-link-1"]').text(),
+    ).toContain('[1]')
+
+    // Switch to chapter 1 (entry 7). Numbering must RESET to [1] — it does
+    // not become [2] just because chapter 2 already used [1].
+    await wrapper.findAll('[data-test="chapter-rail-item"]')[0].trigger('click')
+    await flushPromises()
+    expect(mockFetchChapter).toHaveBeenCalledWith(3, 1)
+    expect(wrapper.find('[data-testid="narrative-footnote-1"]').exists()).toBe(
+      true,
+    )
+    expect(wrapper.find('[data-testid="narrative-footnote-2"]').exists()).toBe(
+      false,
+    )
+    expect(
+      wrapper.find('[data-testid="curation-row-link-1"]').text(),
+    ).toContain('[1]')
+    await router.push('/storylines/3')
+  })
 })
