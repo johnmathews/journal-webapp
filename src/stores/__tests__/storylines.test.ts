@@ -137,6 +137,7 @@ describe('useStorylinesStore', () => {
       observedDuringFetch = s.detailLoading
       return Promise.resolve({
         ...mockSummary({ id: 5 }),
+        chapters: [],
         panels: {
           curation: {
             panel_kind: 'curation' as const,
@@ -176,6 +177,7 @@ describe('useStorylinesStore', () => {
   it('clearCurrent nulls currentStoryline', async () => {
     mockFetchStoryline.mockResolvedValue({
       ...mockSummary({ id: 1 }),
+      chapters: [],
       panels: {},
     })
     const store = useStorylinesStore()
@@ -297,6 +299,7 @@ describe('useStorylinesStore', () => {
   it('removeStoryline clears currentStoryline when the deleted one is loaded', async () => {
     mockFetchStoryline.mockResolvedValue({
       ...mockSummary({ id: 42 }),
+      chapters: [],
       panels: {},
     })
     mockDeleteStoryline.mockResolvedValue({ deleted: true })
@@ -354,6 +357,7 @@ describe('useStorylinesStore', () => {
   it('setAnchors refreshes currentStoryline.anchors from the server response', async () => {
     mockFetchStoryline.mockResolvedValue({
       ...mockSummary({ id: 7 }),
+      chapters: [],
       panels: {},
     })
     // Server response is authoritative: deduped, ascending id order.
@@ -373,6 +377,7 @@ describe('useStorylinesStore', () => {
   it('setAnchors leaves currentStoryline alone when a different storyline is loaded', async () => {
     mockFetchStoryline.mockResolvedValue({
       ...mockSummary({ id: 9 }),
+      chapters: [],
       panels: {},
     })
     mockSetStorylineAnchors.mockResolvedValue({
@@ -422,6 +427,7 @@ describe('useStorylinesStore', () => {
   it('renameStoryline calls the API and refreshes currentStoryline.name', async () => {
     mockFetchStoryline.mockResolvedValue({
       ...mockSummary({ id: 7, name: 'Old' }),
+      chapters: [],
       panels: {},
     })
     mockUpdateStoryline.mockResolvedValue({
@@ -437,6 +443,7 @@ describe('useStorylinesStore', () => {
   it('renameStoryline leaves currentStoryline alone for a different id', async () => {
     mockFetchStoryline.mockResolvedValue({
       ...mockSummary({ id: 9, name: 'Nine' }),
+      chapters: [],
       panels: {},
     })
     mockUpdateStoryline.mockResolvedValue({

@@ -60,6 +60,7 @@ function mockDetail(overrides: Partial<Record<string, unknown>> = {}) {
     last_extension_check_at: null,
     created_at: '2026-05-10T00:00:00Z',
     updated_at: '2026-05-12T10:00:00Z',
+    chapters: [],
     panels: {
       curation: {
         panel_kind: 'curation' as const,
