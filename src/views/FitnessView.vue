@@ -4,6 +4,8 @@ import { storeToRefs } from 'pinia'
 import { useStorage } from '@vueuse/core'
 import { Chart, type ChartType } from 'chart.js'
 import { useFitnessStore } from '@/stores/fitness'
+import { useJobsStore } from '@/stores/jobs'
+import { isTerminal } from '@/types/job'
 import {
   getChartColors,
   getThemedGridColor,
@@ -23,6 +25,7 @@ import {
 } from '@/types/fitness'
 
 const store = useFitnessStore()
+const jobsStore = useJobsStore()
 const {
   activities,
   daily,
@@ -402,11 +405,78 @@ onMounted(() => {
   void reloadAll()
 })
 
+// ── On-page sync buttons (Item 3) ──────────────────────────────────
+//
+// Sync Garmin / Sync Strava submit a sync job via the store and then
+// "spin until done": the button shows a spinner while the submit is in
+// flight AND while the tracked job runs, watched via the jobs store
+// (same pattern as StorylineDetailView.regenerate). On terminal
+// success we reload all data so the charts/tables refresh immediately;
+// on submit or job failure we surface a brief inline error with a
+// deep-link to Settings · Fitness for the details.
+
+// True while a sync for the source is either submitting or its job is
+// still running. Drives the per-button spinner.
+const syncBusy = ref<Record<FitnessSource, boolean>>({
+  strava: false,
+  garmin: false,
+})
+// Brief inline error per source (submit failure or terminal job failure).
+const syncJobError = ref<Record<FitnessSource, string | null>>({
+  strava: null,
+  garmin: null,
+})
+// Active job watchers, so we can stop them on resolve/unmount.
+const syncWatchers: Record<FitnessSource, (() => void) | null> = {
+  strava: null,
+  garmin: null,
+}
+
+function stopSyncWatcher(source: FitnessSource): void {
+  syncWatchers[source]?.()
+  syncWatchers[source] = null
+}
+
+async function onSyncSource(source: FitnessSource): Promise<void> {
+  if (syncBusy.value[source]) return
+  syncBusy.value[source] = true
+  syncJobError.value[source] = null
+  stopSyncWatcher(source)
+
+  const jobId = await store.startSync(source)
+  if (!jobId) {
+    // Submission failed — store.syncError carries the reason.
+    syncJobError.value[source] =
+      store.syncError[source] ?? 'Failed to queue sync'
+    syncBusy.value[source] = false
+    return
+  }
+
+  // Watch the tracked job until it reaches a terminal state.
+  syncWatchers[source] = watch(
+    () => jobsStore.getJobById(jobId),
+    (job) => {
+      if (job && isTerminal(job.status)) {
+        stopSyncWatcher(source)
+        syncBusy.value[source] = false
+        if (job.status === 'succeeded') {
+          void reloadAll()
+        } else {
+          syncJobError.value[source] =
+            job.error_message ?? 'Sync failed — see Settings · Fitness.'
+        }
+      }
+    },
+  )
+}
+
 onBeforeUnmount(() => {
   activitiesChart?.destroy()
   sleepChart?.destroy()
   hrvChart?.destroy()
   rhrChart?.destroy()
+  stopSyncWatcher('strava')
+  stopSyncWatcher('garmin')
   store.cancelPendingStatusRefresh()
 })
 
@@ -473,6 +543,39 @@ function widthTitleForFitnessTile(id: FitnessTileId): string {
           {{ store.editingLayout ? 'Done editing' : 'Edit layout' }}
         </button>
         <button
+          v-for="source in ['garmin', 'strava'] as FitnessSource[]"
+          :key="source"
+          type="button"
+          class="btn bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-gray-700/60 hover:border-gray-300 dark:hover:border-gray-600 text-sm h-9 disabled:opacity-60"
+          :disabled="syncBusy[source]"
+          :data-testid="`fitness-sync-${source}`"
+          @click="onSyncSource(source)"
+        >
+          <svg
+            v-if="syncBusy[source]"
+            class="animate-spin w-4 h-4 mr-1.5 -ml-0.5 text-violet-500"
+            :data-testid="`fitness-sync-${source}-spinner`"
+            xmlns="http://www.w3.org/2000/svg"
+            fill="none"
+            viewBox="0 0 24 24"
+          >
+            <circle
+              class="opacity-25"
+              cx="12"
+              cy="12"
+              r="10"
+              stroke="currentColor"
+              stroke-width="4"
+            />
+            <path
+              class="opacity-75"
+              fill="currentColor"
+              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+            />
+          </svg>
+          Sync {{ sourceLabel(source) }}
+        </button>
+        <button
           type="button"
           data-testid="fitness-reload"
           class="btn bg-violet-500 hover:bg-violet-600 text-white text-sm h-9"
@@ -482,6 +585,27 @@ function widthTitleForFitnessTile(id: FitnessTileId): string {
         </button>
       </div>
     </header>
+
+    <!-- Per-source sync error: submit failed, or the job ended failed.
+         Deep-links to Settings · Fitness for the run history. -->
+    <div v-if="syncJobError.garmin || syncJobError.strava" class="space-y-1">
+      <p
+        v-for="source in ['garmin', 'strava'] as FitnessSource[]"
+        v-show="syncJobError[source]"
+        :key="source"
+        class="text-sm text-rose-500"
+        :data-testid="`fitness-sync-${source}-error`"
+      >
+        {{ sourceLabel(source) }} sync failed: {{ syncJobError[source] }}
+        <RouterLink
+          to="/settings#fitness"
+          class="underline hover:text-rose-600"
+          :data-testid="`fitness-sync-${source}-error-link`"
+        >
+          Settings · Fitness
+        </RouterLink>
+      </p>
+    </div>
 
     <div class="flex flex-wrap items-end gap-4">
       <RangeBinControls
@@ -602,7 +726,9 @@ function widthTitleForFitnessTile(id: FitnessTileId): string {
       @reset="store.resetLayout()"
     >
       <template #tile-weekly-distinct>
-        <header class="flex flex-wrap items-baseline justify-between gap-2 mb-3">
+        <header
+          class="flex flex-wrap items-baseline justify-between gap-2 mb-3"
+        >
           <div>
             <h2 class="text-lg font-semibold text-gray-800 dark:text-gray-100">
               Workouts per week
@@ -617,7 +743,7 @@ function widthTitleForFitnessTile(id: FitnessTileId): string {
               data-testid="fitness-weekly-metric"
             >
               <button
-                v-for="opt in (['count', 'duration'] as WeeklyMetric[])"
+                v-for="opt in ['count', 'duration'] as WeeklyMetric[]"
                 :key="opt"
                 type="button"
                 class="px-2.5 py-1 rounded-full text-xs font-medium border transition-colors capitalize"

@@ -17,6 +17,40 @@ vi.mock('@/api/fitness', () => ({
   fetchIntegrity: vi.fn(),
 }))
 
+// Item 3 watches a tracked sync job via the jobs store. Stub it so the
+// view's job-watching wiring is driven by a controllable fake rather
+// than the real polling machinery. The job is held in a reactive ref so
+// the view's `watch(() => getJobById(id))` re-fires when a test mutates
+// it (running → terminal), mirroring the real store's reactivity.
+import { ref } from 'vue'
+import type { Job } from '@/types/job'
+const jobRef = ref<Job | undefined>(undefined)
+const trackJobSpy = vi.fn()
+vi.mock('@/stores/jobs', () => ({
+  useJobsStore: () => ({
+    trackJob: trackJobSpy,
+    getJobById: () => jobRef.value,
+  }),
+}))
+
+function makeJob(over: Partial<Job> = {}): Job {
+  return {
+    id: 'job-1',
+    type: 'fitness_sync_garmin',
+    status: 'running',
+    params: {},
+    progress_current: 0,
+    progress_total: 0,
+    result: null,
+    error_message: null,
+    status_detail: null,
+    created_at: '2026-05-09T00:00:00Z',
+    started_at: null,
+    finished_at: null,
+    ...over,
+  }
+}
+
 // Same chartjs-config stub the dashboard test uses — happy-dom can't
 // resolve the real CSS variables, and we don't need real rendering for
 // this test (we're checking the view's data/template behaviour, not
@@ -99,10 +133,16 @@ vi.mock('chart.js', () => {
   }
 })
 
-import { fetchActivities, fetchDaily, fetchSyncStatus } from '@/api/fitness'
+import {
+  fetchActivities,
+  fetchDaily,
+  fetchSyncStatus,
+  triggerSync,
+} from '@/api/fitness'
 const mockFetchActivities = vi.mocked(fetchActivities)
 const mockFetchDaily = vi.mocked(fetchDaily)
 const mockFetchSyncStatus = vi.mocked(fetchSyncStatus)
+const mockTriggerSync = vi.mocked(triggerSync)
 
 function makeActivity(over: Partial<FitnessActivity> = {}): FitnessActivity {
   return {
@@ -207,6 +247,8 @@ describe('FitnessView', () => {
     mockFetchActivities.mockResolvedValue({ items: [] })
     mockFetchDaily.mockResolvedValue({ items: [] })
     mockFetchSyncStatus.mockResolvedValue(statusOk())
+    trackJobSpy.mockClear()
+    jobRef.value = undefined
     localStorage.clear()
   })
 
@@ -562,6 +604,97 @@ describe('FitnessView', () => {
         .find('[data-testid="fitness-ma-window-7"]')
         .attributes('aria-pressed'),
     ).toBe('true')
+    wrapper.unmount()
+  })
+
+  // ── Item 3: on-page Garmin/Strava sync buttons ─────────────────────
+
+  it('clicking Sync Garmin calls startSync and spins the button', async () => {
+    mockTriggerSync.mockResolvedValue({ job_id: 'job-1', status: 'queued' })
+    // Job stays running so the spinner persists after submit.
+    jobRef.value = makeJob({ status: 'running' })
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    await wrapper.find('[data-testid="fitness-sync-garmin"]').trigger('click')
+    await flushPromises()
+
+    expect(mockTriggerSync).toHaveBeenCalledWith('garmin')
+    expect(
+      wrapper.find('[data-testid="fitness-sync-garmin-spinner"]').exists(),
+    ).toBe(true)
+    expect(
+      wrapper
+        .find('[data-testid="fitness-sync-garmin"]')
+        .attributes('disabled'),
+    ).toBeDefined()
+    wrapper.unmount()
+  })
+
+  it('reloads all data when the sync job succeeds', async () => {
+    mockTriggerSync.mockResolvedValue({ job_id: 'job-1', status: 'queued' })
+    jobRef.value = makeJob({ status: 'running' })
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    await wrapper.find('[data-testid="fitness-sync-strava"]').trigger('click')
+    await flushPromises()
+
+    mockFetchActivities.mockClear()
+    mockFetchDaily.mockClear()
+
+    // Job transitions to succeeded — the watcher should fire reloadAll.
+    jobRef.value = makeJob({ status: 'succeeded' })
+    await flushPromises()
+
+    expect(mockFetchActivities).toHaveBeenCalled()
+    expect(mockFetchDaily).toHaveBeenCalled()
+    // Spinner cleared after terminal.
+    expect(
+      wrapper.find('[data-testid="fitness-sync-strava-spinner"]').exists(),
+    ).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('shows an inline error with a settings link when the sync job fails', async () => {
+    mockTriggerSync.mockResolvedValue({ job_id: 'job-1', status: 'queued' })
+    jobRef.value = makeJob({ status: 'running' })
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    await wrapper.find('[data-testid="fitness-sync-garmin"]').trigger('click')
+    await flushPromises()
+
+    jobRef.value = makeJob({ status: 'failed', error_message: 'token expired' })
+    await flushPromises()
+
+    const err = wrapper.find('[data-testid="fitness-sync-garmin-error"]')
+    expect(err.exists()).toBe(true)
+    expect(err.text()).toContain('token expired')
+    const link = wrapper.find('[data-testid="fitness-sync-garmin-error-link"]')
+    expect(link.attributes('href')).toContain('/settings#fitness')
+    wrapper.unmount()
+  })
+
+  it('shows an inline error when sync submission fails', async () => {
+    mockTriggerSync.mockRejectedValue(new Error('network down'))
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    await wrapper.find('[data-testid="fitness-sync-strava"]').trigger('click')
+    await flushPromises()
+
+    const err = wrapper.find('[data-testid="fitness-sync-strava-error"]')
+    expect(err.exists()).toBe(true)
+    expect(err.text()).toContain('network down')
+    // No spinner once submission resolved as a failure.
+    expect(
+      wrapper.find('[data-testid="fitness-sync-strava-spinner"]').exists(),
+    ).toBe(false)
     wrapper.unmount()
   })
 
