@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
+import { useStorage } from '@vueuse/core'
 import { Chart, type ChartType } from 'chart.js'
 import { useFitnessStore } from '@/stores/fitness'
 import {
@@ -11,7 +12,7 @@ import {
 import { adjustColorOpacity } from '@/utils/mosaic'
 import RangeBinControls from '@/components/RangeBinControls.vue'
 import TileGrid from '@/components/TileGrid.vue'
-import { movingAverage3 } from '@/utils/moving-average'
+import { movingAverage } from '@/utils/moving-average'
 import {
   FITNESS_TILES,
   fitnessWidthToGridColumn,
@@ -166,6 +167,16 @@ const weekLabels = computed(() =>
   }),
 )
 
+// --- Smoothing window for the daily-wellness trend lines ---
+//
+// The Sleep / HRV / RHR panels overlay a centred moving average on the
+// noisy daily series. The window is user-selectable (3 / 5 / 7 days)
+// and persisted so it survives reloads. Default 3 keeps the historical
+// behaviour. See docs/chart-style-guide.md.
+type MaWindow = 3 | 5 | 7
+const MA_WINDOWS: readonly MaWindow[] = [3, 5, 7]
+const maWindow = useStorage<MaWindow>('fitness:maWindow', 3)
+
 // --- Chart canvases and instances ---
 
 const activitiesChartCanvas = ref<HTMLCanvasElement | null>(null)
@@ -286,18 +297,18 @@ function renderLineChart(
   if (!canvas) return null
   const colors = getChartColors()
   // Sleep / HRV / RHR are noisy day-to-day but trend cleanly when
-  // smoothed. Show the centred 3-day moving average as the bold
-  // primary line and fade the raw daily series so the user sees both
-  // the trend and the underlying data without one obscuring the other.
-  // See docs/chart-style-guide.md.
-  const smoothed = movingAverage3(series.values)
+  // smoothed. Show the centred moving average as the bold primary line
+  // and fade the raw daily series so the user sees both the trend and
+  // the underlying data without one obscuring the other. The window is
+  // user-selectable (3/5/7). See docs/chart-style-guide.md.
+  const smoothed = movingAverage(series.values, maWindow.value)
   return new Chart(canvas, {
     type: 'line' as ChartType,
     data: {
       labels: series.labels,
       datasets: [
         {
-          label: '3-day avg',
+          label: `${maWindow.value}-day avg`,
           data: smoothed,
           borderColor: color,
           backgroundColor: adjustColorOpacity(color, 0.18),
@@ -371,6 +382,12 @@ watch(
     renderRhrChart()
   },
 )
+// Re-render the daily-wellness charts when the smoothing window changes.
+watch(maWindow, () => {
+  renderSleepChart()
+  renderHrvChart()
+  renderRhrChart()
+})
 
 // `reloadAll` populates `activities` and `daily`, which the watchers
 // above pick up and translate into chart renders. No explicit render
@@ -466,13 +483,50 @@ function widthTitleForFitnessTile(id: FitnessTileId): string {
       </div>
     </header>
 
-    <RangeBinControls
-      test-id-prefix="fitness"
-      :range="range"
-      :bin="bin"
-      @update:range="store.setRange($event)"
-      @update:bin="store.setBin($event)"
-    />
+    <div class="flex flex-wrap items-end gap-4">
+      <RangeBinControls
+        test-id-prefix="fitness"
+        :range="range"
+        :bin="bin"
+        @update:range="store.setRange($event)"
+        @update:bin="store.setBin($event)"
+      />
+      <!-- Global smoothing selector for the Sleep / HRV / RHR trend
+           lines. Styled to match the RangeBinControls chip strip. -->
+      <div
+        class="flex items-end gap-2 rounded-xl border border-gray-200 dark:border-gray-700/60 bg-white dark:bg-gray-800 shadow-xs px-5 py-3"
+      >
+        <div>
+          <label
+            class="block text-xs uppercase text-gray-600 dark:text-gray-300 font-semibold mb-1"
+            >Smoothing</label
+          >
+          <div
+            class="flex flex-wrap gap-2"
+            role="radiogroup"
+            aria-label="Moving-average window"
+            data-testid="fitness-ma-window"
+          >
+            <button
+              v-for="w in MA_WINDOWS"
+              :key="w"
+              type="button"
+              class="px-3 py-1 rounded-full text-xs font-medium border transition-colors"
+              :class="
+                maWindow === w
+                  ? 'bg-violet-500 text-white border-violet-500'
+                  : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-700/60'
+              "
+              :data-testid="`fitness-ma-window-${w}`"
+              :aria-pressed="maWindow === w"
+              @click="maWindow = w"
+            >
+              {{ w }}-day
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
 
     <!-- First-run hint when no sources have ever connected -->
     <div

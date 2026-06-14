@@ -207,6 +207,7 @@ describe('FitnessView', () => {
     mockFetchActivities.mockResolvedValue({ items: [] })
     mockFetchDaily.mockResolvedValue({ items: [] })
     mockFetchSyncStatus.mockResolvedValue(statusOk())
+    localStorage.clear()
   })
 
   afterEach(() => {
@@ -499,6 +500,68 @@ describe('FitnessView', () => {
     expect(Math.max(...runDur.data)).toBeCloseTo(1.5, 5)
     // Duration mode labels the y-axis in hours.
     expect(durCfg!.options.scales.y.title?.text).toBe('Hours')
+    wrapper.unmount()
+  })
+
+  // ── Item 2: selectable moving-average window ───────────────────────
+
+  function sleepChartConfig() {
+    const call = chartConstructorSpy.mock.calls.find((c) => {
+      const datasets = (
+        c[1] as { data?: { datasets?: Array<{ borderColor?: string }> } }
+      )?.data?.datasets
+      return datasets?.[0]?.borderColor === '#6366f1'
+    })
+    return call?.[1] as
+      | {
+          data: {
+            datasets: Array<{ label: string; data: Array<number | null> }>
+          }
+        }
+      | undefined
+  }
+
+  it('re-renders the wellness charts with the chosen MA window label', async () => {
+    mockFetchDaily.mockResolvedValue({
+      items: [
+        makeDaily({ id: 1, local_date: '2026-05-07', sleep_score: 70 }),
+        makeDaily({ id: 2, local_date: '2026-05-08', sleep_score: 80 }),
+        makeDaily({ id: 3, local_date: '2026-05-09', sleep_score: 90 }),
+      ],
+    })
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    // Default window = 3.
+    expect(sleepChartConfig()!.data.datasets[0].label).toBe('3-day avg')
+
+    chartConstructorSpy.mockClear()
+    await wrapper.find('[data-testid="fitness-ma-window-5"]').trigger('click')
+    await flushPromises()
+
+    const cfg = sleepChartConfig()!
+    expect(cfg.data.datasets[0].label).toBe('5-day avg')
+    // Window 5 over [70,80,90] at index 1 = mean(70,80,90) = 80.
+    expect(cfg.data.datasets[0].data[1]).toBe(80)
+    wrapper.unmount()
+  })
+
+  it('reads the persisted MA window from storage on mount', async () => {
+    localStorage.setItem('fitness:maWindow', '7')
+    mockFetchDaily.mockResolvedValue({
+      items: [makeDaily({ id: 1, local_date: '2026-05-09', sleep_score: 70 })],
+    })
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(sleepChartConfig()!.data.datasets[0].label).toBe('7-day avg')
+    expect(
+      wrapper
+        .find('[data-testid="fitness-ma-window-7"]')
+        .attributes('aria-pressed'),
+    ).toBe('true')
     wrapper.unmount()
   })
 
