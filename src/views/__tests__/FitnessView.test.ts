@@ -427,6 +427,81 @@ describe('FitnessView', () => {
     wrapper.unmount()
   })
 
+  // ── Item 1: Workouts-per-week Count ↔ Duration toggle ──────────────
+
+  function weeklyChartConfig() {
+    // The weekly chart is the only `type: 'bar'` chart constructed.
+    const call = chartConstructorSpy.mock.calls.find(
+      (c) => (c[1] as { type?: string })?.type === 'bar',
+    )
+    return call?.[1] as
+      | {
+          data: {
+            datasets: Array<{ label: string; data: number[] }>
+          }
+          options: {
+            scales: { y: { title?: { text?: string } } }
+          }
+        }
+      | undefined
+  }
+
+  it('renames the weekly tile heading to "Workouts per week"', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    const heading = wrapper.find('[data-testid="fitness-tile-weekly-distinct"]')
+    expect(heading.text()).toContain('Workouts per week')
+    expect(heading.text()).not.toContain('Distinct workouts per week')
+    wrapper.unmount()
+  })
+
+  it('weekly chart shows counts in count mode and hours in duration mode', async () => {
+    // Two runs in the same ISO week: 1800s + 3600s = 5400s = 1.5h total.
+    mockFetchActivities.mockResolvedValue({
+      items: [
+        makeActivity({
+          id: 1,
+          source: 'strava',
+          source_id: 's1',
+          activity_type: 'run',
+          start_time: '2026-05-04T07:00:00Z', // Monday
+          duration_s: 1800,
+        }),
+        makeActivity({
+          id: 2,
+          source: 'strava',
+          source_id: 's2',
+          activity_type: 'run',
+          start_time: '2026-05-06T07:00:00Z', // Wednesday, same week
+          duration_s: 3600,
+        }),
+      ],
+    })
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    // Default = count: the run series should contain a bucket with 2.
+    const countCfg = weeklyChartConfig()
+    const runCount = countCfg!.data.datasets.find((d) => d.label === 'Run')!
+    expect(Math.max(...runCount.data)).toBe(2)
+    expect(countCfg!.options.scales.y.title).toBeUndefined()
+
+    // Flip to duration: same series now sums to 1.5 hours in one bucket.
+    chartConstructorSpy.mockClear()
+    await wrapper
+      .find('[data-testid="fitness-weekly-metric-duration"]')
+      .trigger('click')
+    await flushPromises()
+
+    const durCfg = weeklyChartConfig()
+    const runDur = durCfg!.data.datasets.find((d) => d.label === 'Run')!
+    expect(Math.max(...runDur.data)).toBeCloseTo(1.5, 5)
+    // Duration mode labels the y-axis in hours.
+    expect(durCfg!.options.scales.y.title?.text).toBe('Hours')
+    wrapper.unmount()
+  })
+
   // T3: tile layout shell adoption.
   it('renders the fitness tile grid with the five default tiles', async () => {
     const wrapper = mountView()

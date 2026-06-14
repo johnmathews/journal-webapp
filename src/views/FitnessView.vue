@@ -82,15 +82,40 @@ const ACTIVITY_TYPE_COLOR: Record<FitnessActivityType, string> = {
   other: '#94a3b8', // slate
 }
 
+// Toggle between counting workouts and summing their duration in the
+// "Workouts per week" tile. Local to this tile (the daily-wellness
+// charts have their own smoothing control); defaults to counts.
+type WeeklyMetric = 'count' | 'duration'
+const weeklyMetric = ref<WeeklyMetric>('count')
+
+function emptyTypeTotals(): Record<FitnessActivityType, number> {
+  return {
+    run: 0,
+    ride: 0,
+    swim: 0,
+    walk: 0,
+    hike: 0,
+    row: 0,
+    strength: 0,
+    other: 0,
+  }
+}
+
 interface WeeklyBucket {
   weekStart: string // ISO date — Monday
+  // Distinct-activity count per type.
   byType: Record<FitnessActivityType, number>
+  // Summed `duration_s` per type, so the tile can render hours as well
+  // as counts without re-bucketing.
+  durationByType: Record<FitnessActivityType, number>
 }
 
 /**
  * Bucket distinct workouts into ISO weeks (Monday start). Returns
  * one bucket per week in [startDate, endDate], even empty ones, so
- * Chart.js doesn't compress visually identical gaps.
+ * Chart.js doesn't compress visually identical gaps. Each bucket
+ * tracks both the distinct-activity count and the summed duration
+ * (seconds) per activity type.
  */
 function bucketByWeek(): WeeklyBucket[] {
   const start = new Date(startDate.value + 'T00:00:00Z')
@@ -107,16 +132,8 @@ function bucketByWeek(): WeeklyBucket[] {
     const weekStart = cursor.toISOString().slice(0, 10)
     buckets.push({
       weekStart,
-      byType: {
-        run: 0,
-        ride: 0,
-        swim: 0,
-        walk: 0,
-        hike: 0,
-        row: 0,
-        strength: 0,
-        other: 0,
-      },
+      byType: emptyTypeTotals(),
+      durationByType: emptyTypeTotals(),
     })
     cursor.setUTCDate(cursor.getUTCDate() + 7)
   }
@@ -133,6 +150,7 @@ function bucketByWeek(): WeeklyBucket[] {
     })
     if (idx === -1) continue
     buckets[idx].byType[a.activity_type] += 1
+    buckets[idx].durationByType[a.activity_type] += a.duration_s
   }
 
   return buckets
@@ -160,13 +178,27 @@ let sleepChart: Chart | null = null
 let hrvChart: Chart | null = null
 let rhrChart: Chart | null = null
 
+/** Human-readable duration from a fractional number of hours. */
+function formatHours(hours: number): string {
+  const totalMinutes = Math.round(hours * 60)
+  const h = Math.floor(totalMinutes / 60)
+  const m = totalMinutes % 60
+  if (h > 0) return `${h}h ${m}m`
+  return `${m}m`
+}
+
 function renderActivitiesChart(): void {
   if (!activitiesChartCanvas.value) return
   const colors = getChartColors()
   activitiesChart?.destroy()
+  const byDuration = weeklyMetric.value === 'duration'
   const datasets = ACTIVITY_TYPE_ORDER.map((type) => ({
     label: type.charAt(0).toUpperCase() + type.slice(1),
-    data: weeklyBuckets.value.map((b) => b.byType[type]),
+    data: weeklyBuckets.value.map((b) =>
+      // Count mode: distinct activities. Duration mode: summed hours
+      // (seconds / 3600) so the y-axis reads in a human unit.
+      byDuration ? b.durationByType[type] / 3600 : b.byType[type],
+    ),
     backgroundColor: ACTIVITY_TYPE_COLOR[type],
     borderRadius: 2,
     borderSkipped: false as const,
@@ -187,6 +219,14 @@ function renderActivitiesChart(): void {
         tooltip: {
           filter: (item) => (item.parsed?.y ?? 0) > 0,
           itemSort: (a, b) => b.datasetIndex - a.datasetIndex,
+          callbacks: byDuration
+            ? {
+                label: (item) => {
+                  const hours = item.parsed?.y ?? 0
+                  return `${item.dataset.label}: ${formatHours(hours)}`
+                },
+              }
+            : undefined,
           backgroundColor: colors.tooltipBgColor.light,
           titleColor: colors.tooltipTitleColor.light,
           bodyColor: colors.tooltipBodyColor.light,
@@ -202,8 +242,16 @@ function renderActivitiesChart(): void {
         y: {
           stacked: true,
           beginAtZero: true,
+          title: byDuration
+            ? { display: true, text: 'Hours', color: colors.textColor.light }
+            : undefined,
           grid: { color: getThemedGridColor() },
-          ticks: { color: colors.textColor.light, precision: 0 },
+          ticks: {
+            color: colors.textColor.light,
+            // Count mode shows whole activities; duration shows hours
+            // where a fractional axis is fine.
+            precision: byDuration ? 1 : 0,
+          },
         },
       },
     },
@@ -313,6 +361,8 @@ watch(
   () => activities.value,
   () => renderActivitiesChart(),
 )
+// Re-render the weekly chart when the user flips Count ↔ Duration.
+watch(weeklyMetric, () => renderActivitiesChart())
 watch(
   () => daily.value,
   () => {
@@ -498,16 +548,42 @@ function widthTitleForFitnessTile(id: FitnessTileId): string {
       @reset="store.resetLayout()"
     >
       <template #tile-weekly-distinct>
-        <header class="flex items-baseline justify-between mb-3">
+        <header class="flex flex-wrap items-baseline justify-between gap-2 mb-3">
           <div>
             <h2 class="text-lg font-semibold text-gray-800 dark:text-gray-100">
-              Distinct workouts per week
+              Workouts per week
             </h2>
           </div>
-          <span class="text-xs text-gray-500 dark:text-gray-400">
-            {{ activities.length }} raw rows · {{ distinctActivities.length }}
-            distinct
-          </span>
+          <div class="flex items-center gap-3">
+            <!-- Count ↔ Duration toggle for this tile's stacked bars. -->
+            <div
+              class="flex gap-1"
+              role="radiogroup"
+              aria-label="Weekly metric"
+              data-testid="fitness-weekly-metric"
+            >
+              <button
+                v-for="opt in (['count', 'duration'] as WeeklyMetric[])"
+                :key="opt"
+                type="button"
+                class="px-2.5 py-1 rounded-full text-xs font-medium border transition-colors capitalize"
+                :class="
+                  weeklyMetric === opt
+                    ? 'bg-violet-500 text-white border-violet-500'
+                    : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-700/60'
+                "
+                :data-testid="`fitness-weekly-metric-${opt}`"
+                :aria-pressed="weeklyMetric === opt"
+                @click="weeklyMetric = opt"
+              >
+                {{ opt }}
+              </button>
+            </div>
+            <span class="text-xs text-gray-500 dark:text-gray-400">
+              {{ activities.length }} raw rows · {{ distinctActivities.length }}
+              distinct
+            </span>
+          </div>
         </header>
         <div class="h-64">
           <canvas ref="activitiesChartCanvas" data-testid="fitness-weekly-chart"
