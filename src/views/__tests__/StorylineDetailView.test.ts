@@ -1013,4 +1013,50 @@ describe('StorylineDetailView', () => {
     expect(wrapper.find('[data-test="confirm"]').exists()).toBe(false)
     expect(mockDeleteChapter).not.toHaveBeenCalled()
   })
+
+  // --- per-chapter generating badge (feat/storyline-chapter-editing) ---
+
+  it('shows [data-test="chapter-generating"] badge for chapters in generatingChapterIds', async () => {
+    mockFetchStoryline.mockResolvedValue(mockDetailTwoChapters())
+    const wrapper = mountComponent()
+    await flushPromises()
+
+    // Initially no generating badge anywhere.
+    expect(wrapper.findAll('[data-test="chapter-generating"]')).toHaveLength(0)
+
+    // Directly mutate the store's generatingChapterIds to include chapter 1.
+    const { useStorylinesStore } = await import('@/stores/storylines')
+    const store = useStorylinesStore()
+    store.generatingChapterIds = new Set([1])
+    await wrapper.vm.$nextTick()
+
+    // The badge appears for chapter 1 only.
+    const badges = wrapper.findAll('[data-test="chapter-generating"]')
+    expect(badges).toHaveLength(1)
+  })
+
+  it('does not show a generating badge for chapters not in generatingChapterIds', async () => {
+    mockFetchStoryline.mockResolvedValue(mockDetailTwoChapters())
+    const wrapper = mountComponent()
+    await flushPromises()
+
+    // generatingChapterIds contains only chapter 2 — chapter 1 should NOT show badge.
+    const { useStorylinesStore } = await import('@/stores/storylines')
+    const store = useStorylinesStore()
+    store.generatingChapterIds = new Set([2])
+    await wrapper.vm.$nextTick()
+
+    const badges = wrapper.findAll('[data-test="chapter-generating"]')
+    expect(badges).toHaveLength(1)
+    // Confirm the badge is on the second rail item (chapter 2).
+    const items = wrapper.findAll('[data-test="chapter-rail-item"]')
+    // The second li should contain the badge.
+    const secondLi = items[1].element.parentElement!
+    expect(
+      secondLi.querySelector('[data-test="chapter-generating"]'),
+    ).not.toBeNull()
+    // The first li should NOT contain the badge.
+    const firstLi = items[0].element.parentElement!
+    expect(firstLi.querySelector('[data-test="chapter-generating"]')).toBeNull()
+  })
 })

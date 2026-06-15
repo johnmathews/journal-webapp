@@ -583,6 +583,13 @@ onMounted(async () => {
                   >
                 </span>
               </button>
+              <span
+                v-if="store.generatingChapterIds.has(c.id)"
+                data-test="chapter-generating"
+                class="text-xs text-violet-500 dark:text-violet-400 animate-pulse self-center"
+                aria-label="Generating chapter content"
+                >generating…</span
+              >
               <ChapterEditMenu
                 :chapter="c"
                 :has-next="index < chapters.length - 1"
