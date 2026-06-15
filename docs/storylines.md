@@ -1,6 +1,6 @@
 # Storylines (webapp)
 
-**Status:** active reference. **Last updated:** 2026-06-15 (Chapter editing UI: add / edit-dates / split / merge / delete from the rail).
+**Status:** active reference. **Last updated:** 2026-06-15 (Chapter editing UI + live generating state + ranged add-chapter).
 
 The webapp surface for the storylines feature. A storyline is a cross-entry
 narrative anchored on **one or more entities** (1..15; the multi-anchor cycle
@@ -81,7 +81,8 @@ src/
                                                 Merge with next (hidden when no next) / Delete
   components/storylines/ChapterDateModal.vue  — date-picker modal used by Add, Edit, and Split
                                                 actions; `showEnd` prop controls whether the end-date
-                                                field is rendered
+                                                field is rendered; optional `hint` prop renders a
+                                                helper line below the date fields
   components/storylines/ChapterConfirmModal.vue — confirmation modal for destructive actions (delete,
                                                   merge); `showAllowGap` prop reveals the
                                                   "Leave a gap" checkbox
@@ -167,6 +168,16 @@ current chapter's panels (see [Shared citation numbering](#shared-citation-numbe
 `[N]` numbering restarts at `[1]` for each chapter rather than running
 continuously across the whole storyline.
 
+**Store state** (on `useStorylinesStore`):
+
+- `generatingChapterIds` — reactive `Ref<Set<number>>` tracking chapter ids
+  whose auto-queued regeneration jobs are currently in-flight. Templates call
+  `.has(ch.id)` to conditionally show a "generating…" badge. The set is
+  populated immediately after each structural edit and cleared (plus the
+  storyline is reloaded) once every job in the returned `job_ids[]` reaches a
+  terminal status. Implemented via `_trackChapterRegens`, which calls
+  `useJobsStore().trackJob(...)` per job and watches their statuses.
+
 **Store actions** (all on `useStorylinesStore`):
 
 - `loadChapter(storylineId, chapterId)` — fetch a chapter's detail into
@@ -225,11 +236,20 @@ follow-up.
 The detail view's left chapter rail exposes two surfaces for structural edits:
 
 **Add chapter button.** A `+ Add chapter` button sits at the top of the rail.
-Clicking it opens `ChapterDateModal` with `showEnd: false`. The user provides
-a `start_date`; the server closes the currently-open chapter at that date and
-opens a new one starting there, returning a `ChapterMutationResponse` with the
-new chapter summary and a `job_ids[]` for the auto-queued regeneration. The
-store's `addChapter` action re-fetches the storyline so the rail refreshes.
+Clicking it opens `ChapterDateModal` with `showEnd: true` and a contextual hint
+line: "Leave End blank to start a new open chapter, or set it to add a chapter
+over a fixed date range." Two behaviours depending on what the user provides:
+
+- **End blank (new open chapter):** the user supplies only a `start_date`; the
+  server closes the currently-open chapter at that date and opens a new one
+  starting there, auto-queuing regeneration for both.
+- **End set (closed chapter over a fixed range):** the user supplies both
+  `start_date` and `end_date`; the server inserts a closed chapter over that
+  range, auto-queuing regeneration for the new chapter.
+
+In both cases the store's `addChapter` action re-fetches the storyline so the
+rail refreshes, and `_trackChapterRegens` marks the affected chapter ids in
+`generatingChapterIds`.
 
 **Per-chapter ⋯ menu.** Each rail item carries a `ChapterEditMenu` component
 that renders a `⋯` toggle button opening a small dropdown. The menu is
@@ -264,11 +284,18 @@ The four operations:
   flag the server absorbs the deleted chapter's date range into the previous
   neighbor; with the flag it leaves a gap. Returns `{ deleted, job_ids[] }`.
 
-**Auto-regeneration.** Every structural edit returns `job_ids[]` (an array of
-background-job ids the server has auto-queued for the affected chapters'
-regeneration). The store re-fetches the whole storyline after each edit so the
-rail reflects the new chapter set immediately; the jobs run asynchronously and
-the panels populate when they complete.
+**Auto-regeneration and live generating state.** Every structural edit returns
+`job_ids[]` (an array of background-job ids the server has auto-queued for the
+affected chapters' regeneration). The store re-fetches the whole storyline after
+each edit so the rail reflects the new chapter set immediately, then calls
+`_trackChapterRegens` to:
+
+1. Add the affected chapter ids to `generatingChapterIds` — the rail renders a
+   `"generating…"` badge (`data-test="chapter-generating"`) on each marked item.
+2. Register each job via `useJobsStore().trackJob(...)`.
+3. Watch job statuses — once all returned jobs reach a terminal state
+   (`succeeded` or `failed`), the chapter ids are removed from
+   `generatingChapterIds` and the storyline is reloaded to surface fresh panels.
 
 **Component design.** `ChapterEditMenu`, `ChapterDateModal`, and
 `ChapterConfirmModal` are purely presentational (no store imports). They receive

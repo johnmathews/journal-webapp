@@ -88,13 +88,39 @@ to absorbing. Edit-dates ripples the neighbor silently (server default) for now;
 adding a gap option to the date modal is a follow-up once the UX need is clear.
 
 **Auto-regeneration on every structural edit.** The server queues regeneration
-for affected chapters automatically and returns `job_ids[]`. The webapp does not
-track or surface these job ids in the UI today — the rail refreshes via the
-storyline re-fetch and the panels update when the jobs complete. Surfacing
-per-chapter job progress in the rail is a possible follow-up.
+for affected chapters automatically and returns `job_ids[]`. The rail refreshes
+via the storyline re-fetch and the panels update when the jobs complete.
+Per-chapter job progress is now surfaced in the rail — see follow-up section
+below.
 
 ## Server-side reference
 
 The backend chapter-edit endpoints are specified in
 `server/docs/superpowers/specs/2026-06-13-storyline-chapters-design.md` and
 were implemented as part of the same Phase 2 cycle that produced this UI.
+
+## Follow-up: generating state + ranged add (2026-06-15)
+
+Two follow-up enhancements shipped in the same session as the base chapter
+editing UI, in commits `29263f7` and `3d7b159`.
+
+**Live per-chapter generating state.** After any structural chapter edit the
+store now calls `_trackChapterRegens(storylineId, chapterIds, jobIds)`. This
+helper adds the affected chapter ids to a new reactive `generatingChapterIds`
+`Ref<Set<number>>` immediately, then watches the returned jobs via
+`useJobsStore` — once every job reaches a terminal status the ids are cleared
+and the storyline is reloaded. The chapter rail shows a `"generating…"` badge
+(`data-test="chapter-generating"`) on each marked item.
+
+The decision to reuse `useJobsStore` rather than a bespoke polling loop was
+deliberate: the jobs store already tracks `{ job_id, status }` for the
+storyline-level regenerate flow; wiring into the same watcher pattern meant the
+per-chapter badge gets all the cancellation and de-duplication logic for free.
+
+**Ranged add-chapter.** `ChapterDateModal` gained an optional `hint` prop (a
+helper line below the date fields). The "Add chapter" flow now opens the modal
+with `showEnd: true` and the hint: "Leave End blank to start a new open chapter,
+or set it to add a chapter over a fixed date range." When end is set, the view
+passes `end_date` through to `store.addChapter`; the server creates a closed
+chapter over the fixed range instead of opening a new live chapter. Both paths
+go through the same `addChapter` action and `_trackChapterRegens` call.
