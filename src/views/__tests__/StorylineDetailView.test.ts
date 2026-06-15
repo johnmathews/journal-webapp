@@ -15,6 +15,11 @@ vi.mock('@/api/storylines', () => ({
   fetchStorylineChapter: vi.fn(),
   regenerateStorylineChapter: vi.fn(),
   renameStorylineChapter: vi.fn(),
+  addChapter: vi.fn(),
+  splitChapter: vi.fn(),
+  mergeChapters: vi.fn(),
+  updateChapterWindow: vi.fn(),
+  deleteChapter: vi.fn(),
 }))
 
 // The inline anchor editor searches entities; stub the API so tests
@@ -37,17 +42,27 @@ vi.mock('@/composables/useToast', () => ({
 }))
 
 import {
+  addChapter,
+  deleteChapter as deleteChapterApi,
   deleteStoryline,
   fetchStoryline,
   fetchStorylineChapter,
+  mergeChapters as mergeChaptersApi,
   regenerateStoryline,
   setStorylineAnchors,
+  splitChapter as splitChapterApi,
+  updateChapterWindow,
   updateStoryline,
 } from '@/api/storylines'
 const mockFetchStoryline = vi.mocked(fetchStoryline)
 const mockFetchChapter = vi.mocked(fetchStorylineChapter)
 const mockRegenerate = vi.mocked(regenerateStoryline)
 const mockDelete = vi.mocked(deleteStoryline)
+const mockAddChapter = vi.mocked(addChapter)
+const mockSplitChapter = vi.mocked(splitChapterApi)
+const mockMergeChapters = vi.mocked(mergeChaptersApi)
+const mockUpdateChapterWindow = vi.mocked(updateChapterWindow)
+const mockDeleteChapter = vi.mocked(deleteChapterApi)
 const mockSetAnchors = vi.mocked(setStorylineAnchors)
 const mockUpdateStoryline = vi.mocked(updateStoryline)
 
@@ -840,5 +855,162 @@ describe('StorylineDetailView', () => {
       wrapper.find('[data-testid="curation-row-link-1"]').text(),
     ).toContain('[1]')
     await router.push('/storylines/3')
+  })
+
+  // --- Chapter editing (feat/storyline-chapter-editing) ---
+
+  it('renders an "Add chapter" button in the chapter rail', async () => {
+    const wrapper = mountComponent()
+    await flushPromises()
+    expect(wrapper.find('[data-test="add-chapter"]').exists()).toBe(true)
+  })
+
+  it('Add chapter button opens the date modal and addChapter is called on submit', async () => {
+    mockAddChapter.mockResolvedValue({
+      chapter: {
+        id: 10,
+        storyline_id: 3,
+        seq: 2,
+        title: 'Chapter 2',
+        start_date: '2026-06-01',
+        end_date: null,
+        state: 'open' as const,
+        last_generated_at: null,
+        citation_count: 0,
+      },
+      job_ids: [],
+    })
+    const wrapper = mountComponent()
+    await flushPromises()
+
+    // Open the modal
+    await wrapper.find('[data-test="add-chapter"]').trigger('click')
+    // ChapterDateModal should appear
+    expect(wrapper.find('[data-test="start"]').exists()).toBe(true)
+    // Fill in the start date
+    await wrapper.find('[data-test="start"]').setValue('2026-06-01')
+    // Submit
+    await wrapper.find('[data-test="save"]').trigger('click')
+    await flushPromises()
+
+    expect(mockAddChapter).toHaveBeenCalledWith(3, { start_date: '2026-06-01' })
+    // Modal closes
+    expect(wrapper.find('[data-test="start"]').exists()).toBe(false)
+  })
+
+  it('renders ChapterEditMenu for each chapter in the rail', async () => {
+    mockFetchStoryline.mockResolvedValue(mockDetailTwoChapters())
+    const wrapper = mountComponent()
+    await flushPromises()
+    expect(wrapper.findAll('[data-test="menu-toggle"]')).toHaveLength(2)
+  })
+
+  it('edit intent opens the date modal and updateChapterDates is called on submit', async () => {
+    mockFetchStoryline.mockResolvedValue(mockDetailTwoChapters())
+    mockUpdateChapterWindow.mockResolvedValue({
+      chapters: [],
+      job_ids: [],
+    })
+    const wrapper = mountComponent()
+    await flushPromises()
+
+    // Open menu for first chapter and click Edit dates
+    await wrapper.findAll('[data-test="menu-toggle"]')[0].trigger('click')
+    await wrapper.find('[data-test="action-edit"]').trigger('click')
+    // ChapterDateModal should appear
+    expect(wrapper.find('[data-test="start"]').exists()).toBe(true)
+    await wrapper.find('[data-test="start"]').setValue('2026-01-15')
+    await wrapper.find('[data-test="save"]').trigger('click')
+    await flushPromises()
+
+    expect(mockUpdateChapterWindow).toHaveBeenCalledWith(
+      3,
+      1,
+      expect.objectContaining({ start_date: '2026-01-15' }),
+    )
+    expect(wrapper.find('[data-test="start"]').exists()).toBe(false)
+  })
+
+  it('split intent opens the date modal and splitChapter is called on submit', async () => {
+    mockFetchStoryline.mockResolvedValue(mockDetailTwoChapters())
+    mockSplitChapter.mockResolvedValue({ chapters: [], job_ids: [] })
+    const wrapper = mountComponent()
+    await flushPromises()
+
+    await wrapper.findAll('[data-test="menu-toggle"]')[0].trigger('click')
+    await wrapper.find('[data-test="action-split"]').trigger('click')
+    expect(wrapper.find('[data-test="start"]').exists()).toBe(true)
+    await wrapper.find('[data-test="start"]').setValue('2026-01-20')
+    await wrapper.find('[data-test="save"]').trigger('click')
+    await flushPromises()
+
+    expect(mockSplitChapter).toHaveBeenCalledWith(3, 1, { date: '2026-01-20' })
+    expect(wrapper.find('[data-test="start"]').exists()).toBe(false)
+  })
+
+  it('merge intent calls mergeChapters with the current and next chapter ids', async () => {
+    mockFetchStoryline.mockResolvedValue(mockDetailTwoChapters())
+    mockMergeChapters.mockResolvedValue({
+      chapter: {
+        id: 1,
+        storyline_id: 3,
+        seq: 1,
+        title: 'Ch1+Ch2',
+        start_date: '2026-01-01',
+        end_date: null,
+        state: 'open' as const,
+        last_generated_at: null,
+        citation_count: 0,
+      },
+      job_ids: [],
+    })
+    const wrapper = mountComponent()
+    await flushPromises()
+
+    // First chapter has hasNext=true so merge option is visible
+    await wrapper.findAll('[data-test="menu-toggle"]')[0].trigger('click')
+    await wrapper.find('[data-test="action-merge"]').trigger('click')
+    await flushPromises()
+
+    expect(mockMergeChapters).toHaveBeenCalledWith(3, { chapter_ids: [1, 2] })
+  })
+
+  it('delete intent opens confirm modal and deleteChapter is called on confirm', async () => {
+    mockFetchStoryline.mockResolvedValue(mockDetailTwoChapters())
+    mockDeleteChapter.mockResolvedValue({ deleted: true, job_ids: [] })
+    const wrapper = mountComponent()
+    await flushPromises()
+
+    await wrapper.findAll('[data-test="menu-toggle"]')[0].trigger('click')
+    await wrapper.find('[data-test="action-delete"]').trigger('click')
+    // ChapterConfirmModal should appear
+    expect(wrapper.find('[data-test="confirm"]').exists()).toBe(true)
+    await wrapper.find('[data-test="confirm"]').trigger('click')
+    await flushPromises()
+
+    expect(mockDeleteChapter).toHaveBeenCalledWith(3, 1, { allow_gap: false })
+    expect(wrapper.find('[data-test="confirm"]').exists()).toBe(false)
+  })
+
+  it('Cancel in the date modal closes it without calling any action', async () => {
+    const wrapper = mountComponent()
+    await flushPromises()
+    await wrapper.find('[data-test="add-chapter"]').trigger('click')
+    expect(wrapper.find('[data-test="start"]').exists()).toBe(true)
+    await wrapper.find('[data-test="cancel"]').trigger('click')
+    expect(wrapper.find('[data-test="start"]').exists()).toBe(false)
+    expect(mockAddChapter).not.toHaveBeenCalled()
+  })
+
+  it('Cancel in the confirm modal closes it without calling deleteChapter', async () => {
+    mockFetchStoryline.mockResolvedValue(mockDetailTwoChapters())
+    const wrapper = mountComponent()
+    await flushPromises()
+    await wrapper.findAll('[data-test="menu-toggle"]')[0].trigger('click')
+    await wrapper.find('[data-test="action-delete"]').trigger('click')
+    expect(wrapper.find('[data-test="confirm"]').exists()).toBe(true)
+    await wrapper.find('[data-test="cancel"]').trigger('click')
+    expect(wrapper.find('[data-test="confirm"]').exists()).toBe(false)
+    expect(mockDeleteChapter).not.toHaveBeenCalled()
   })
 })
