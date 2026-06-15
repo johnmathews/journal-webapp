@@ -6,6 +6,7 @@ const props = defineProps<{
   initialStart?: string
   initialEnd?: string
   showEnd: boolean
+  hint?: string
 }>()
 const emit = defineEmits<{
   submit: [{ start_date?: string; end_date?: string }]
@@ -45,6 +46,13 @@ function save() {
           class="mt-1 w-full rounded border px-2 py-1 dark:bg-slate-700"
         />
       </label>
+      <p
+        v-if="hint"
+        data-test="chapter-modal-hint"
+        class="mt-3 text-xs text-gray-500 dark:text-gray-400"
+      >
+        {{ hint }}
+      </p>
       <div class="mt-4 flex justify-end gap-2">
         <button
           data-test="cancel"

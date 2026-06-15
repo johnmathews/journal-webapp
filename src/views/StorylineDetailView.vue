@@ -86,6 +86,7 @@ async function onAddChapterSubmit(payload: {
   try {
     await store.addChapter(store.currentStoryline.id, {
       start_date: payload.start_date,
+      ...(payload.end_date ? { end_date: payload.end_date } : {}),
     })
     closeModal()
   } catch (e) {
@@ -605,8 +606,9 @@ onMounted(async () => {
         <!-- Chapter date modal (add / edit / split) -->
         <ChapterDateModal
           v-if="activeModal === 'add'"
-          title="Start a new chapter"
-          :show-end="false"
+          title="Add chapter"
+          :show-end="true"
+          hint="Leave End blank to start a new open chapter, or set it to add a chapter over a fixed date range."
           @submit="onAddChapterSubmit"
           @cancel="closeModal"
         />

@@ -865,7 +865,7 @@ describe('StorylineDetailView', () => {
     expect(wrapper.find('[data-test="add-chapter"]').exists()).toBe(true)
   })
 
-  it('Add chapter button opens the date modal and addChapter is called on submit', async () => {
+  it('Add chapter button opens the date modal and addChapter is called on submit (start only → open chapter)', async () => {
     mockAddChapter.mockResolvedValue({
       chapter: {
         id: 10,
@@ -885,9 +885,10 @@ describe('StorylineDetailView', () => {
 
     // Open the modal
     await wrapper.find('[data-test="add-chapter"]').trigger('click')
-    // ChapterDateModal should appear
+    // ChapterDateModal should appear with both start and end fields (show-end=true)
     expect(wrapper.find('[data-test="start"]').exists()).toBe(true)
-    // Fill in the start date
+    expect(wrapper.find('[data-test="end"]').exists()).toBe(true)
+    // Fill in only the start date — leaves End blank → new-latest open chapter
     await wrapper.find('[data-test="start"]').setValue('2026-06-01')
     // Submit
     await wrapper.find('[data-test="save"]').trigger('click')
@@ -896,6 +897,53 @@ describe('StorylineDetailView', () => {
     expect(mockAddChapter).toHaveBeenCalledWith(3, { start_date: '2026-06-01' })
     // Modal closes
     expect(wrapper.find('[data-test="start"]').exists()).toBe(false)
+  })
+
+  it('Add chapter with both start and end calls addChapter with { start_date, end_date } (ranged chapter)', async () => {
+    mockAddChapter.mockResolvedValue({
+      chapter: {
+        id: 11,
+        storyline_id: 3,
+        seq: 2,
+        title: 'Chapter 2',
+        start_date: '2026-01-01',
+        end_date: '2026-03-31',
+        state: 'closed' as const,
+        last_generated_at: null,
+        citation_count: 0,
+      },
+      job_ids: [],
+    })
+    const wrapper = mountComponent()
+    await flushPromises()
+
+    await wrapper.find('[data-test="add-chapter"]').trigger('click')
+    expect(wrapper.find('[data-test="start"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="end"]').exists()).toBe(true)
+
+    await wrapper.find('[data-test="start"]').setValue('2026-01-01')
+    await wrapper.find('[data-test="end"]').setValue('2026-03-31')
+    await wrapper.find('[data-test="save"]').trigger('click')
+    await flushPromises()
+
+    expect(mockAddChapter).toHaveBeenCalledWith(3, {
+      start_date: '2026-01-01',
+      end_date: '2026-03-31',
+    })
+    // Modal closes
+    expect(wrapper.find('[data-test="start"]').exists()).toBe(false)
+  })
+
+  it('Add modal shows a hint about the optional End field', async () => {
+    const wrapper = mountComponent()
+    await flushPromises()
+
+    await wrapper.find('[data-test="add-chapter"]').trigger('click')
+    // The hint text should be visible in the add modal
+    expect(wrapper.find('[data-test="chapter-modal-hint"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="chapter-modal-hint"]').text()).toContain(
+      'End blank',
+    )
   })
 
   it('renders ChapterEditMenu for each chapter in the rail', async () => {
