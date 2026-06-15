@@ -1,6 +1,9 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import type {
+  AddChapterRequest,
+  ChapterMutationResponse,
+  ChapterMultiMutationResponse,
   CreateStorylineRequest,
   CreateStorylineResponse,
   RegenerateStorylineRequest,
@@ -10,17 +13,23 @@ import type {
   StorylineDetail,
   StorylineListParams,
   StorylineSummary,
+  UpdateChapterWindowRequest,
 } from '@/types/storyline'
 import {
+  addChapter as addChapterApi,
   createStoryline as createStorylineApi,
+  deleteChapter as deleteChapterApi,
   deleteStoryline as deleteStorylineApi,
   fetchStoryline,
   fetchStorylineChapter,
   fetchStorylines,
+  mergeChapters as mergeChaptersApi,
   regenerateStoryline as regenerateStorylineApi,
   regenerateStorylineChapter as regenerateStorylineChapterApi,
   renameStorylineChapter as renameStorylineChapterApi,
   setStorylineAnchors as setStorylineAnchorsApi,
+  splitChapter as splitChapterApi,
+  updateChapterWindow as updateChapterWindowApi,
   updateStoryline as updateStorylineApi,
 } from '@/api/storylines'
 
@@ -254,6 +263,55 @@ export const useStorylinesStore = defineStore('storylines', () => {
     }
   }
 
+  async function addChapter(
+    storylineId: number,
+    request: AddChapterRequest,
+  ): Promise<ChapterMutationResponse> {
+    const resp = await addChapterApi(storylineId, request)
+    await loadStoryline(storylineId)
+    return resp
+  }
+
+  async function splitChapter(
+    storylineId: number,
+    chapterId: number,
+    date: string,
+  ): Promise<ChapterMultiMutationResponse> {
+    const resp = await splitChapterApi(storylineId, chapterId, { date })
+    await loadStoryline(storylineId)
+    return resp
+  }
+
+  async function mergeChapters(
+    storylineId: number,
+    chapterIds: number[],
+  ): Promise<ChapterMutationResponse> {
+    const resp = await mergeChaptersApi(storylineId, {
+      chapter_ids: chapterIds,
+    })
+    await loadStoryline(storylineId)
+    return resp
+  }
+
+  async function updateChapterDates(
+    storylineId: number,
+    chapterId: number,
+    request: UpdateChapterWindowRequest,
+  ): Promise<ChapterMultiMutationResponse> {
+    const resp = await updateChapterWindowApi(storylineId, chapterId, request)
+    await loadStoryline(storylineId)
+    return resp
+  }
+
+  async function deleteChapter(
+    storylineId: number,
+    chapterId: number,
+    allowGap = false,
+  ): Promise<void> {
+    await deleteChapterApi(storylineId, chapterId, { allow_gap: allowGap })
+    await loadStoryline(storylineId)
+  }
+
   async function removeStoryline(id: number): Promise<void> {
     error.value = null
     try {
@@ -302,5 +360,10 @@ export const useStorylinesStore = defineStore('storylines', () => {
     setAnchors,
     renameStoryline,
     removeStoryline,
+    addChapter,
+    splitChapter,
+    mergeChapters,
+    updateChapterDates,
+    deleteChapter,
   }
 })
