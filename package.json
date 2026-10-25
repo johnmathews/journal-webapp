@@ -32,7 +32,7 @@
     "chart.js": "^4.5.1",
     "diff-match-patch": "^1.0.5",
     "pinia": "^3.0.4",
-    "vue": "^3.5.32",
+    "vue": "^3.5.44",
     "vue-router": "^5.0.4"
   },
   "devDependencies": {
