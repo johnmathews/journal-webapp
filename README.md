@@ -1,3 +1,7 @@
+> **This repository has moved.** It is now the `webapp/` folder of the monorepo
+> [johnmathews/journal](https://github.com/johnmathews/journal/tree/main/webapp), with full history
+> (merged 2026-11-11). This repo is archived and read-only; open issues and PRs there.
+
 # Journal Webapp
 
 Web frontend for the [Journal Analysis Tool](https://github.com/johnmathews/journal-server) — a personal journal
